@@ -1,0 +1,46 @@
+# ============================================================
+# VOTING SERVER SERVICE
+# Mục đích: Expose voting-server ra ngoài cluster để browser
+# có thể truy cập giao diện vote.
+# Service này cũng load balance traffic giữa các Pod replicas.
+# ============================================================
+
+# apiVersion: v1 — Service thuộc core API group.
+apiVersion: v1
+
+# kind: Service — tạo stable network endpoint cho voting-server Pods.
+kind: Service
+
+metadata:
+  # name: "voting-server" — tên Service, cũng là DNS hostname nội bộ.
+  # Các service khác trong cluster có thể gọi "voting-server:3000".
+  name: voting-server
+
+  labels:
+    app: voting-server
+
+spec:
+  # selector: Service tìm các Pod có label app=voting-server để forward traffic.
+  # Khi Pod mới được tạo (scale up), Service tự thêm Pod đó vào pool.
+  # Khi Pod bị xoá (scale down), Service tự loại khỏi pool.
+  selector:
+    app: voting-server
+
+  ports:
+    - # name: Nhãn cho port (hữu ích khi debug và có nhiều port).
+      name: http
+
+      # port: Port mà Service lắng nghe từ bên ngoài (hoặc từ Pod khác).
+      # Browser sẽ gọi: http://localhost:3000 (sau khi K8s expose ra host).
+      port: 3000
+
+      # targetPort: Port trên Pod mà Service forward traffic vào.
+      # Phải khớp với containerPort: 3000 trong voting-server-deployment.yaml.
+      targetPort: 3000
+
+  # type: LoadBalancer — expose Service ra ngoài cluster.
+  # Trên Docker Desktop: K8s tự map port này ra localhost máy Mac.
+  # → Bạn có thể mở http://localhost:3000 trực tiếp trên browser.
+  # So sánh với ClusterIP (chỉ internal) và NodePort (mở port trên Node).
+  # Trên cloud (AWS/GCP/Azure): LoadBalancer tự tạo External IP thật.
+  type: LoadBalancer

@@ -1,0 +1,48 @@
+# ============================================================
+# REDIS SERVICE
+# Mục đích: Tạo một "địa chỉ mạng nội bộ" ổn định cho Redis
+# trong cluster Kubernetes.
+# Nhờ Service này, voting-server và result-server có thể kết nối
+# Redis bằng hostname "redis" thay vì IP động của Pod.
+# ============================================================
+
+# apiVersion: v1 — Service thuộc nhóm core API, không cần prefix "apps/".
+apiVersion: v1
+
+# kind: Service — tài nguyên quản lý network trong K8s.
+# Service theo dõi các Pod khớp selector và tự cân bằng tải (load balance) traffic.
+kind: Service
+
+metadata:
+  # name: "redis" — Tên Service này cũng là hostname DNS nội bộ.
+  # Các Pod khác trong cùng namespace có thể dùng "redis:6379" để kết nối.
+  # Đây là cơ chế "Service Discovery" của Kubernetes.
+  name: redis
+
+  labels:
+    app: redis
+
+spec:
+  # selector: Service forward traffic đến các Pod có label app=redis.
+  # Nếu Pod Redis bị restart và có IP mới, Service tự cập nhật — app không cần biết IP.
+  selector:
+    app: redis
+
+  ports:
+    - # name: Đặt tên cho port (tuỳ chọn, hữu ích khi Service có nhiều port).
+      name: redis
+
+      # port: Port mà Service lắng nghe (phía client gọi vào).
+      # voting-server dùng REDIS_PORT=6379 → kết nối vào đây.
+      port: 6379
+
+      # targetPort: Port trên Pod mà Service sẽ forward traffic đến.
+      # Phải khớp với containerPort trong redis-deployment.yaml.
+      targetPort: 6379
+
+  # type: ClusterIP — Service chỉ accessible bên trong cluster.
+  # Đây là loại mặc định và phù hợp nhất cho Redis vì:
+  # - Redis không cần expose ra ngoài cluster.
+  # - Chỉ voting-server và result-server (trong cùng cluster) cần truy cập.
+  # So sánh: LoadBalancer dùng cho service cần expose ra internet/browser.
+  type: ClusterIP

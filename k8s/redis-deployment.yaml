@@ -1,0 +1,68 @@
+# ============================================================
+# REDIS DEPLOYMENT
+# Mục đích: Tạo và duy trì Pod Redis trong cụm Kubernetes.
+# Redis đóng vai trò "database" dùng chung cho voting-server
+# và result-server, kết nối qua Service nội bộ (ClusterIP).
+# ============================================================
+
+# apiVersion: Phiên bản API nhóm "apps" — dùng để tạo Deployment.
+# "apps/v1" là phiên bản stable hiện tại.
+apiVersion: apps/v1
+
+# kind: Loại tài nguyên Kubernetes.
+# Deployment tự động duy trì số lượng Pod mong muốn,
+# tự restart khi Pod chết, và hỗ trợ rolling update.
+kind: Deployment
+
+metadata:
+  # name: Tên định danh Deployment trong cluster.
+  # Dùng để kubectl get/describe/delete deployment redis.
+  name: redis
+
+  # labels: Nhãn gắn vào Deployment (không phải Pod).
+  # Dùng để filter tài nguyên bằng kubectl.
+  labels:
+    app: redis
+
+spec:
+  # replicas: Số lượng Pod Redis mong muốn luôn chạy.
+  # Dùng 1 cho môi trường học tập.
+  # Lưu ý: Redis không nên scale ngang mà không có cấu hình cluster Redis riêng.
+  replicas: 1
+
+  # selector: Deployment dùng label này để nhận diện và quản lý đúng Pod.
+  # Phải khớp CHÍNH XÁC với template.metadata.labels bên dưới.
+  selector:
+    matchLabels:
+      app: redis
+
+  # template: Khuôn mẫu để tạo Pod.
+  # Mỗi khi K8s cần tạo Pod mới (restart, scale), dùng template này.
+  template:
+    metadata:
+      # labels: Label gắn lên từng Pod được tạo ra.
+      # Deployment selector và Service selector đều dựa vào label này
+      # để biết Pod nào thuộc Redis.
+      labels:
+        app: redis
+
+    spec:
+      containers:
+        - # name: Tên container bên trong Pod.
+          # Một Pod có thể có nhiều container (sidecar pattern).
+          name: redis
+
+          # image: Image Docker chính thức Redis phiên bản 7, tag alpine.
+          # alpine = rất nhỏ gọn (~30MB), phù hợp học tập lẫn production.
+          image: redis:7-alpine
+
+          # imagePullPolicy: IfNotPresent — chỉ pull image nếu chưa có ở local.
+          # Khi chạy Docker Desktop, image đã có → không pull lại từ internet.
+          # Đổi thành "Always" nếu muốn luôn lấy bản mới nhất từ registry.
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - # containerPort: Port Redis lắng nghe bên trong container.
+              # Khai báo này mang tính tài liệu hoá.
+              # Traffic thực tế đến Pod thông qua Service, không qua containerPort trực tiếp.
+              containerPort: 6379

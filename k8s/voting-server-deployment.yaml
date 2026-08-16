@@ -1,0 +1,100 @@
+# ============================================================
+# VOTING SERVER DEPLOYMENT
+# Mục đích: Deploy ứng dụng voting-server lên Kubernetes.
+# voting-server nhận vote từ browser, lưu vào Redis.
+# Chạy 2 replica để minh hoạ khái niệm scaling và load balancing.
+# ============================================================
+
+# apiVersion: apps/v1 — phiên bản API stable cho Deployment.
+apiVersion: apps/v1
+
+# kind: Deployment — K8s quản lý vòng đời Pod, tự heal và rolling update.
+kind: Deployment
+
+metadata:
+  # name: Tên Deployment, dùng để kubectl get/describe/rollout.
+  name: voting-server
+
+  labels:
+    app: voting-server
+
+spec:
+  # replicas: Chạy 2 Pod voting-server cùng lúc.
+  # Mục đích học: minh hoạ scaling ngang (horizontal scaling).
+  # Service sẽ tự load balance request giữa 2 Pod này.
+  # Thử đổi thành 1 hoặc 5 rồi chạy: kubectl scale deployment voting-server --replicas=5
+  replicas: 2
+
+  # selector: Deployment nhận diện Pod của mình qua label app=voting-server.
+  # Nếu label không khớp template.metadata.labels → K8s báo lỗi ngay khi apply.
+  selector:
+    matchLabels:
+      app: voting-server
+
+  template:
+    metadata:
+      # labels: Label gắn lên mỗi Pod được tạo ra.
+      # Service dùng label này để biết Pod nào nhận traffic.
+      labels:
+        app: voting-server
+
+    spec:
+      containers:
+        - # name: Tên container trong Pod.
+          name: voting-server
+
+          # image: Image local đã build bằng docker build.
+          # "k8s-voting-demo/voting-server:local" là tên bạn đặt khi chạy:
+          #   docker build -t k8s-voting-demo/voting-server:local ./services/voting-server
+          image: k8s-voting-demo/voting-server:local
+
+          # imagePullPolicy: IfNotPresent — dùng image đã có ở Docker Desktop local.
+          # QUAN TRỌNG: Phải dùng IfNotPresent hoặc Never khi dùng local image.
+          # Nếu để Always, K8s sẽ cố pull từ Docker Hub → lỗi "image not found".
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - # containerPort: Port voting-server lắng nghe trong container.
+              # Phải khớp với PORT=3000 trong src/index.js.
+              containerPort: 3000
+
+          # env: Inject environment variables vào container khi khởi động.
+          # Đây là cách Kubernetes truyền cấu hình — không hardcode trong code.
+          env:
+            - # REDIS_HOST: Hostname của Redis Service.
+              # Giá trị "redis" chính là tên Service trong redis-service.yaml.
+              # K8s DNS tự resolve "redis" → ClusterIP của Redis Service.
+              # Đây là cơ chế SERVICE DISCOVERY của Kubernetes.
+              name: REDIS_HOST
+              value: redis
+
+            - # REDIS_PORT: Port Redis lắng nghe.
+              # Phải là string trong YAML khi dùng value (không phải number).
+              name: REDIS_PORT
+              value: "6379"
+
+          # readinessProbe: K8s kiểm tra xem Pod đã sẵn sàng nhận traffic chưa.
+          # Chỉ khi probe này PASS, Service mới forward request vào Pod.
+          # Mục đích: tránh gửi traffic vào Pod đang khởi động hoặc Redis chưa ready.
+          # GET /ready → voting-server tự kiểm tra kết nối Redis và trả lời.
+          readinessProbe:
+            httpGet:
+              path: /ready     # Endpoint health check trong Express app
+              port: 3000
+            initialDelaySeconds: 5   # Chờ 5 giây sau khi container start rồi mới check
+            periodSeconds: 5         # Check mỗi 5 giây
+            timeoutSeconds: 2        # Timeout sau 2 giây nếu không có response
+            failureThreshold: 3      # Thất bại 3 lần liên tiếp → Pod chưa ready
+
+          # livenessProbe: K8s kiểm tra Pod còn "sống" không.
+          # Nếu probe này FAIL liên tiếp → K8s tự restart container.
+          # Mục đích: tự động phục hồi khi app bị treo (deadlock, memory leak...).
+          # GET /health → luôn trả 200 nếu Express đang chạy bình thường.
+          livenessProbe:
+            httpGet:
+              path: /health    # Endpoint đơn giản, không check external dependencies
+              port: 3000
+            initialDelaySeconds: 10  # Chờ 10 giây — lâu hơn readiness để app kịp start
+            periodSeconds: 10        # Check mỗi 10 giây
+            timeoutSeconds: 2        # Timeout sau 2 giây
+            failureThreshold: 3      # Thất bại 3 lần → K8s restart container

@@ -1,0 +1,95 @@
+# ============================================================
+# RESULT SERVER DEPLOYMENT
+# Mục đích: Deploy ứng dụng result-server lên Kubernetes.
+# result-server đọc vote count từ Redis và hiển thị kết quả.
+# Chạy 2 replica — minh hoạ scaling và high availability.
+# ============================================================
+
+# apiVersion: apps/v1 — phiên bản API stable cho Deployment.
+apiVersion: apps/v1
+
+# kind: Deployment — K8s quản lý vòng đời Pod, rolling update, self-healing.
+kind: Deployment
+
+metadata:
+  # name: Tên Deployment.
+  # Dùng: kubectl rollout status deployment/result-server
+  name: result-server
+
+  labels:
+    app: result-server
+
+spec:
+  # replicas: 2 Pod result-server chạy song song.
+  # Requests từ browser sẽ được load balance giữa 2 Pod.
+  # Thử scale: kubectl scale deployment result-server --replicas=3
+  replicas: 2
+
+  # selector: Deployment quản lý các Pod có label app=result-server.
+  selector:
+    matchLabels:
+      app: result-server
+
+  template:
+    metadata:
+      # labels: Label gắn lên Pod — Service dùng để định tuyến traffic.
+      labels:
+        app: result-server
+
+    spec:
+      containers:
+        - # name: Tên container trong Pod.
+          name: result-server
+
+          # image: Local image đã build bằng:
+          #   docker build -t k8s-voting-demo/result-server:local ./services/result-server
+          image: k8s-voting-demo/result-server:local
+
+          # imagePullPolicy: IfNotPresent — bắt buộc khi dùng local image.
+          # Nếu để "Always" → K8s cố pull từ Docker Hub → lỗi image not found.
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - # containerPort: Port result-server lắng nghe trong container.
+              # Phải khớp với PORT=3001 trong src/index.js.
+              containerPort: 3001
+
+          # env: Environment variables inject vào container khi khởi động.
+          # Kubernetes Best Practice: dùng env để truyền config, không hardcode.
+          env:
+            - # REDIS_HOST: "redis" chính là tên của redis-service.yaml.
+              # Kubernetes DNS tự resolve tên Service → ClusterIP.
+              # Đây là SERVICE DISCOVERY: result-server tìm Redis qua tên, không qua IP.
+              name: REDIS_HOST
+              value: redis
+
+            - # REDIS_PORT: Port của Redis Service.
+              # Phải là string (dùng dấu nháy kép) trong YAML env value.
+              name: REDIS_PORT
+              value: "6379"
+
+          # readinessProbe: Kiểm tra result-server đã sẵn sàng nhận traffic chưa.
+          # K8s chỉ route request vào Pod khi probe này trả HTTP 200.
+          # GET /ready → result-server kiểm tra kết nối Redis và phản hồi.
+          # Ý nghĩa: tránh user nhận lỗi khi Pod đang warm up hoặc Redis chưa kết nối.
+          readinessProbe:
+            httpGet:
+              path: /ready     # Endpoint kiểm tra Redis connectivity
+              port: 3001
+            initialDelaySeconds: 5   # Chờ 5s sau khi container start mới check
+            periodSeconds: 5         # Lặp lại check mỗi 5 giây
+            timeoutSeconds: 2        # Coi như fail nếu không response trong 2 giây
+            failureThreshold: 3      # Fail 3 lần liên tiếp → Pod chưa ready
+
+          # livenessProbe: Kiểm tra container còn hoạt động bình thường không.
+          # Nếu fail liên tiếp → K8s tự restart container (self-healing).
+          # GET /health → đơn giản, luôn 200 nếu Express process đang chạy.
+          # Ý nghĩa: recover tự động khi app bị treo mà không cần can thiệp thủ công.
+          livenessProbe:
+            httpGet:
+              path: /health    # Endpoint luôn 200 nếu server đang chạy
+              port: 3001
+            initialDelaySeconds: 10  # Chờ lâu hơn readiness — cho app kịp khởi động
+            periodSeconds: 10        # Check mỗi 10 giây
+            timeoutSeconds: 2        # Timeout 2 giây
+            failureThreshold: 3      # Fail 3 lần → K8s restart container
