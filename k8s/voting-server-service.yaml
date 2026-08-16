@@ -1,19 +1,19 @@
 # ============================================================
 # VOTING SERVER SERVICE
-# Mục đích: Expose voting-server ra ngoài cluster để browser
-# có thể truy cập giao diện vote.
-# Service này cũng load balance traffic giữa các Pod replicas.
+# Mục đích: Tạo stable network endpoint nội bộ cho voting-server.
+# Sau khi thêm Ingress, service này KHÔNG cần expose ra ngoài nữa.
+# Ingress Controller sẽ là entry point duy nhất từ bên ngoài cluster.
 # ============================================================
 
 # apiVersion: v1 — Service thuộc core API group.
 apiVersion: v1
 
-# kind: Service — tạo stable network endpoint cho voting-server Pods.
+# kind: Service — tạo stable endpoint cho voting-server Pods.
 kind: Service
 
 metadata:
   # name: "voting-server" — tên Service, cũng là DNS hostname nội bộ.
-  # Các service khác trong cluster có thể gọi "voting-server:3000".
+  # Ingress sẽ forward traffic đến "voting-server:3000" qua tên này.
   name: voting-server
 
   labels:
@@ -27,20 +27,19 @@ spec:
     app: voting-server
 
   ports:
-    - # name: Nhãn cho port (hữu ích khi debug và có nhiều port).
+    - # name: Nhãn cho port.
       name: http
 
-      # port: Port mà Service lắng nghe từ bên ngoài (hoặc từ Pod khác).
-      # Browser sẽ gọi: http://localhost:3000 (sau khi K8s expose ra host).
+      # port: Port Service lắng nghe (Ingress gọi vào đây).
       port: 3000
 
       # targetPort: Port trên Pod mà Service forward traffic vào.
       # Phải khớp với containerPort: 3000 trong voting-server-deployment.yaml.
       targetPort: 3000
 
-  # type: LoadBalancer — expose Service ra ngoài cluster.
-  # Trên Docker Desktop: K8s tự map port này ra localhost máy Mac.
-  # → Bạn có thể mở http://localhost:3000 trực tiếp trên browser.
-  # So sánh với ClusterIP (chỉ internal) và NodePort (mở port trên Node).
-  # Trên cloud (AWS/GCP/Azure): LoadBalancer tự tạo External IP thật.
-  type: LoadBalancer
+  # type: ClusterIP — Service chỉ accessible bên trong cluster.
+  # Đây là THAY ĐỔI so với LoadBalancer:
+  # - Trước: mỗi service tự expose ra ngoài → cần nhiều external port.
+  # - Sau:  Ingress là single entry point → tất cả traffic đi qua 1 chỗ.
+  # ClusterIP an toàn hơn vì voting-server không bị expose trực tiếp ra internet.
+  type: ClusterIP

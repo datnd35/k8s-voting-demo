@@ -1,8 +1,8 @@
 # ============================================================
 # RESULT SERVER SERVICE
-# Mục đích: Expose result-server ra ngoài cluster để browser
-# có thể truy cập trang hiển thị kết quả vote.
-# Load balance traffic giữa các Pod replicas.
+# Mục đích: Tạo stable network endpoint nội bộ cho result-server.
+# Sau khi thêm Ingress, service này KHÔNG expose trực tiếp ra ngoài.
+# Ingress Controller sẽ route traffic từ results.local vào đây.
 # ============================================================
 
 # apiVersion: v1 — Service thuộc core API group.
@@ -13,7 +13,7 @@ kind: Service
 
 metadata:
   # name: "result-server" — DNS hostname nội bộ của Service.
-  # Pod khác trong cluster có thể gọi "result-server:3001".
+  # Ingress rule sẽ forward traffic đến "result-server:3001".
   name: result-server
 
   labels:
@@ -21,24 +21,21 @@ metadata:
 
 spec:
   # selector: Service forward traffic đến Pod có label app=result-server.
-  # Khi scale up/down, Service tự thêm/bớt Pod vào pool không cần config lại.
   selector:
     app: result-server
 
   ports:
-    - # name: Tên cho port mapping (giúp debug dễ hơn).
+    - # name: Tên cho port mapping.
       name: http
 
-      # port: Port Service lắng nghe từ bên ngoài.
-      # Truy cập: http://localhost:3001 sau khi Docker Desktop expose ra host.
+      # port: Port Service lắng nghe (Ingress gọi vào đây).
       port: 3001
 
-      # targetPort: Port trên Pod nhận traffic từ Service.
-      # Phải khớp với containerPort: 3001 trong result-server-deployment.yaml.
+      # targetPort: Port trên Pod nhận traffic.
+      # Phải khớp containerPort: 3001 trong result-server-deployment.yaml.
       targetPort: 3001
 
-  # type: LoadBalancer — expose Service ra ngoài cluster.
-  # Docker Desktop tự map port 3001 ra localhost Mac.
-  # → Mở http://localhost:3001 trực tiếp trên browser để xem kết quả vote.
-  # Khác với redis-service dùng ClusterIP vì Redis không cần expose ra ngoài.
-  type: LoadBalancer
+  # type: ClusterIP — chỉ accessible bên trong cluster.
+  # Ingress Controller (trong cluster) sẽ forward traffic vào đây.
+  # Bên ngoài cluster không thể gọi trực tiếp result-server — phải qua Ingress.
+  type: ClusterIP

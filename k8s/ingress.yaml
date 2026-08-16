@@ -1,0 +1,108 @@
+# ============================================================
+# INGRESS — NGINX INGRESS CONTROLLER
+# ============================================================
+# Mục đích: Tạo một điểm vào DUY NHẤT (single entry point) cho toàn bộ
+# hệ thống từ bên ngoài cluster.
+#
+# Trước khi có Ingress (cách cũ):
+#   Browser → voting-server LoadBalancer (port 3000) → Pod
+#   Browser → result-server LoadBalancer (port 3001) → Pod
+#   Mỗi service cần 1 external IP/port riêng → khó quản lý khi nhiều service.
+#
+# Sau khi có Ingress (cách chuẩn production):
+#   Browser → Ingress Controller (port 80) → voting-server (routing theo host)
+#   Browser → Ingress Controller (port 80) → result-server (routing theo host)
+#   Một entry point duy nhất, route theo hostname / path.
+#
+# Routing trong project này (host-based):
+#   http://voting.local  → voting-server:3000
+#   http://results.local → result-server:3001
+#
+# Yêu cầu: NGINX Ingress Controller phải được cài trước.
+# Cài bằng lệnh:
+#   kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.11.1/deploy/static/provider/cloud/deploy.yaml
+# ============================================================
+
+# apiVersion: networking.k8s.io/v1 — API group cho Ingress.
+# Đây là phiên bản stable từ K8s 1.19+, thay thế extensions/v1beta1 cũ.
+apiVersion: networking.k8s.io/v1
+
+# kind: Ingress — loại tài nguyên quản lý HTTP routing từ ngoài vào trong cluster.
+kind: Ingress
+
+metadata:
+  # name: Tên Ingress resource.
+  name: k8s-voting-ingress
+
+  # annotations: Cấu hình bổ sung cho NGINX Ingress Controller.
+  # Đây là cách truyền config đặc thù của controller mà không thay đổi spec chung.
+  annotations:
+    # Khai báo dùng NGINX làm Ingress Controller.
+    # Nếu cluster có nhiều controller (nginx, traefik, istio...), annotation này
+    # xác định controller nào sẽ xử lý Ingress này.
+    kubernetes.io/ingress.class: "nginx"
+
+    # nginx.ingress.kubernetes.io/use-regex: Cho phép dùng regex trong path rules.
+    # Hữu ích khi cần route theo pattern phức tạp hơn.
+    nginx.ingress.kubernetes.io/use-regex: "true"
+
+    # proxy-connect-timeout / proxy-send-timeout / proxy-read-timeout:
+    # Thời gian timeout cho kết nối upstream (đơn vị: giây).
+    # Tăng lên nếu app cần xử lý lâu (ví dụ: file upload, long polling).
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "10"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "30"
+
+spec:
+  # ingressClassName: Chỉ định IngressClass sẽ xử lý resource này.
+  # Từ K8s 1.18+, đây là cách mới thay thế annotation kubernetes.io/ingress.class.
+  # Giữ cả 2 (annotation + ingressClassName) để tương thích nhiều phiên bản K8s.
+  ingressClassName: nginx
+
+  # rules: Danh sách routing rules — mỗi rule gắn với 1 hostname.
+  # NGINX Ingress đọc header "Host" của HTTP request để chọn đúng rule.
+  rules:
+    # -------------------------------------------------------
+    # RULE 1: voting.local → voting-server
+    # -------------------------------------------------------
+    # host: Hostname mà rule này áp dụng.
+    # Khi browser gửi request với header Host: voting.local,
+    # NGINX Ingress sẽ forward request vào voting-server service.
+    # Cần thêm "127.0.0.1 voting.local" vào /etc/hosts trên máy Mac.
+    - host: voting.local
+      http:
+        paths:
+          - # path: "/" — match tất cả path bắt đầu bằng "/" (toàn bộ app).
+            path: /
+            # pathType: Prefix — match prefix, không phải exact string.
+            # Ví dụ: /, /vote, /health, /ready đều match.
+            # Loại khác: Exact (chỉ match đúng path), ImplementationSpecific.
+            pathType: Prefix
+            backend:
+              service:
+                # name: Tên Service mà Ingress sẽ forward traffic đến.
+                # Phải khớp chính xác với metadata.name trong voting-server-service.yaml.
+                name: voting-server
+                port:
+                  # number: Port của Service (không phải targetPort hay containerPort).
+                  # Phải khớp với spec.ports[].port trong voting-server-service.yaml.
+                  number: 3000
+
+    # -------------------------------------------------------
+    # RULE 2: results.local → result-server
+    # -------------------------------------------------------
+    # host: Hostname cho result-server.
+    # Cần thêm "127.0.0.1 results.local" vào /etc/hosts trên máy Mac.
+    - host: results.local
+      http:
+        paths:
+          - # path: "/" — match toàn bộ path của result-server.
+            path: /
+            pathType: Prefix
+            backend:
+              service:
+                # name: Phải khớp với metadata.name trong result-server-service.yaml.
+                name: result-server
+                port:
+                  # number: Port của result-server Service.
+                  number: 3001
